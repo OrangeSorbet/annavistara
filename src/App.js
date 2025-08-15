@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 // Note for deployment: The Excel export functionality requires the 'xlsx' library.
 // Please include the following script tag in your main HTML file's <head> section:
-// 
+// <script src="https://cdn.jsdelivr.net/npm/xlsx/dist/xlsx.full.min.js"></script>
 
 // --- IMPORTANT FOR DARK MODE ---
 // For Dark Mode to work, you MUST update your `tailwind.config.js` file.
@@ -175,10 +175,12 @@ const ProfilePage = () => {
         const userProfile = localStorage.getItem('userProfile');
         const dailyLog = localStorage.getItem('dailyLog');
         const mealConstants = localStorage.getItem('mealConstants');
+        const supplementConstants = localStorage.getItem('supplementConstants');
         const data = {
             userProfile: userProfile ? JSON.parse(userProfile) : {},
             dailyLog: dailyLog ? JSON.parse(dailyLog) : {},
-            mealConstants: mealConstants ? JSON.parse(mealConstants) : {}
+            mealConstants: mealConstants ? JSON.parse(mealConstants) : {},
+            supplementConstants: supplementConstants ? JSON.parse(supplementConstants) : {}
         };
         const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(data, null, 2));
         const downloadAnchorNode = document.createElement('a');
@@ -203,6 +205,9 @@ const ProfilePage = () => {
                 }
                 if (data.mealConstants) {
                     localStorage.setItem('mealConstants', JSON.stringify(data.mealConstants));
+                }
+                 if (data.supplementConstants) {
+                    localStorage.setItem('supplementConstants', JSON.stringify(data.supplementConstants));
                 }
                 alert('Data restored successfully!');
             } catch (error) {
@@ -331,6 +336,7 @@ const ProfilePage = () => {
 const MealTrackerPage = () => {
     const [dailyLog, setDailyLog] = useState({});
     const [mealConstants, setMealConstants] = useState({});
+    const [supplementConstants, setSupplementConstants] = useState({});
     const [currentDate, setCurrentDate] = useState(new Date().toISOString().split('T')[0]);
     const [analysisResult, setAnalysisResult] = useState(null);
     const [isLoading, setIsLoading] = useState(false);
@@ -347,8 +353,10 @@ const MealTrackerPage = () => {
     useEffect(() => {
         const storedLog = localStorage.getItem('dailyLog');
         if (storedLog) setDailyLog(JSON.parse(storedLog));
-        const storedConstants = localStorage.getItem('mealConstants');
-        if (storedConstants) setMealConstants(JSON.parse(storedConstants));
+        const storedMealConstants = localStorage.getItem('mealConstants');
+        if (storedMealConstants) setMealConstants(JSON.parse(storedMealConstants));
+        const storedSupplementConstants = localStorage.getItem('supplementConstants');
+        if (storedSupplementConstants) setSupplementConstants(JSON.parse(storedSupplementConstants));
     }, []);
 
     const saveLog = useCallback((newLog) => {
@@ -356,9 +364,14 @@ const MealTrackerPage = () => {
         localStorage.setItem('dailyLog', JSON.stringify(newLog));
     }, []);
 
-    const saveConstants = useCallback((newConstants) => {
+    const saveMealConstants = useCallback((newConstants) => {
         setMealConstants(newConstants);
         localStorage.setItem('mealConstants', JSON.stringify(newConstants));
+    }, []);
+
+    const saveSupplementConstants = useCallback((newConstants) => {
+        setSupplementConstants(newConstants);
+        localStorage.setItem('supplementConstants', JSON.stringify(newConstants));
     }, []);
     
     const handleAddMeal = (mealData) => {
@@ -373,12 +386,33 @@ const MealTrackerPage = () => {
     };
 
     const handleAddSupplement = async () => {
-        if (!supplementName || !supplementDose) return;
+        if (!supplementName) return;
+
+        const keyword = supplementName.toLowerCase().trim();
+        if (supplementConstants[keyword]) {
+            const newLog = { ...dailyLog };
+            if (!newLog[currentDate]) {
+                newLog[currentDate] = { meals: [], supplements: [] };
+            }
+            newLog[currentDate].supplements.push({ ...supplementConstants[keyword], id: Date.now() });
+            saveLog(newLog);
+            alert(`Logged supplement from shortcut: ${keyword}`);
+            setSupplementName('');
+            setSupplementDose('');
+            setShowSupplementForm(false);
+            return;
+        }
+
+        if (!supplementDose) {
+            alert("Please provide a dose for the new supplement.");
+            return;
+        }
+
         setIsLoading(true);
         setLoadingMessage(`Analyzing ${supplementName}...`);
 
         try {
-            const analysisPrompt = `Provide a detailed nutritional information for the supplement "${supplementName}" with a dose of "${supplementDose}". Include an exhaustive list of macros (Calories, Protein, Carbs, Fat) and key micronutrients (like Vitamin C, B3, E, B5, A, B6, B2, B1, B12, Magnesium, Chloride, Sodium, Calcium, Iron, Zinc, Manganese, Copper, Iodine, Omega-3). Format the response as a valid JSON object only, like this: {"name": "${supplementName}", "dose": "${supplementDose}", "nutrition": {"Calories": 0, "Protein (g)": 0, "Carbs (g)": 0, "Fat (g)": 0, "Vitamin C (mg)": 40, "Zinc (mg)": 10}}. If a nutrient isn't present, omit it.`;
+            const analysisPrompt = `Act as a nutritional database. Provide a highly accurate and detailed nutritional information for the supplement "${supplementName}" with a dose of "${supplementDose}". Include an exhaustive list of all possible macros and micronutrients. Format the response as a valid JSON object only, like this: {"name": "${supplementName}", "dose": "${supplementDose}", "nutrition": {"Calories": 0, "Protein (g)": 0, "Carbs (g)": 0, "Fat (g)": 0, "Vitamin C (mg)": 40, "Zinc (mg)": 10}}. If a nutrient isn't present, omit it.`;
             let resultText = await callGeminiApiForAnalysis(analysisPrompt);
             const parsedResult = JSON.parse((resultText.match(/\{[\s\S]*\}/) || ['{}'])[0]);
 
@@ -439,7 +473,7 @@ const MealTrackerPage = () => {
     };
     
     const callGeminiApiForAnalysis = async (prompt, base64ImageData = null) => {
-        const apiKey = process.env.REACT_APP_GEMINI_API_KEY;
+        const apiKey = ""; // API key will be injected by the environment
         const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-05-20:generateContent?key=${apiKey}`;
         let parts = [{ text: prompt }];
         if (base64ImageData) {
@@ -472,6 +506,17 @@ const MealTrackerPage = () => {
             setIsLoading(false);
             setLoadingMessage('');
         }
+    };
+    
+    const handleCameraAnalysis = (event) => {
+        const file = event.target.files[0];
+        if (!file) return;
+        const reader = new FileReader();
+        reader.onloadend = () => {
+            const base64String = reader.result.split(',')[1];
+            analyzeMeal("the meal in the image", base64String);
+        };
+        reader.readAsDataURL(file);
     };
 
     const handleTextAnalysis = () => {
@@ -507,11 +552,11 @@ const MealTrackerPage = () => {
                         
                         <div className="text-center">
                             <button onClick={() => setShowConstantCreator(!showConstantCreator)} className="text-sm text-blue-500 hover:underline">
-                                {showConstantCreator ? 'Hide Shortcut Creator' : 'Create Meal Shortcut'}
+                                {showConstantCreator ? 'Hide Shortcut Creator' : 'Create Meal/Supplement Shortcut'}
                             </button>
                         </div>
 
-                        {showConstantCreator && <MealConstantCreator saveConstants={saveConstants} mealConstants={mealConstants} />}
+                        {showConstantCreator && <MealConstantCreator saveMealConstants={saveMealConstants} mealConstants={mealConstants} saveSupplementConstants={saveSupplementConstants} supplementConstants={supplementConstants} />}
 
                         <button onClick={handleTextAnalysis} className="w-full bg-indigo-600 text-white font-semibold py-2 px-4 rounded-md hover:bg-indigo-700">Analyze or Log Meal</button>
                     </div>
@@ -521,7 +566,7 @@ const MealTrackerPage = () => {
                         <label htmlFor="meal-image" className="w-full flex items-center justify-center gap-2 bg-indigo-600 text-white font-semibold py-2 px-4 rounded-md hover:bg-indigo-700 cursor-pointer">
                             <CameraIcon /> Upload Meal Photo
                         </label>
-                        <input type="file" id="meal-image" className="hidden" accept="image/*" onChange={e => { const file = e.target.files[0]; if (file) { const reader = new FileReader(); reader.onloadend = () => analyzeMeal("the meal in the image", reader.result.split(',')[1]); reader.readAsDataURL(file); } }} />
+                        <input type="file" id="meal-image" className="hidden" accept="image/*" onChange={handleCameraAnalysis} />
                     </div>
                 )}
 
@@ -574,7 +619,7 @@ const MealTrackerPage = () => {
                     </h3>
                     {showSupplementForm && (
                         <div className="space-y-2 mb-4 p-2 bg-gray-100 dark:bg-gray-700 rounded-md">
-                            <input type="text" value={supplementName} onChange={e => setSupplementName(e.target.value)} placeholder="Supplement name" className="w-full p-2 border rounded-md bg-white dark:bg-gray-600 border-gray-300 dark:border-gray-500"/>
+                            <input type="text" value={supplementName} onChange={e => setSupplementName(e.target.value)} placeholder="Supplement name or shortcut" className="w-full p-2 border rounded-md bg-white dark:bg-gray-600 border-gray-300 dark:border-gray-500"/>
                             <input type="text" value={supplementDose} onChange={e => setSupplementDose(e.target.value)} placeholder="Dose (e.g., 1 capsule)" className="w-full p-2 border rounded-md bg-white dark:bg-gray-600 border-gray-300 dark:border-gray-500"/>
                             <div className="flex gap-2">
                                 <button onClick={handleAddSupplement} className="w-full bg-green-500 text-white font-semibold py-1 px-3 rounded-md" disabled={isLoading}>{isLoading ? 'Analyzing...' : 'Add'}</button>
@@ -611,14 +656,16 @@ const MealTrackerPage = () => {
 };
 
 // --- Meal Constant Creator ---
-const MealConstantCreator = ({ saveConstants, mealConstants }) => {
+const MealConstantCreator = ({ saveMealConstants, mealConstants, saveSupplementConstants, supplementConstants }) => {
+    const [type, setType] = useState('meal');
     const [keyword, setKeyword] = useState('');
     const [nutrition, setNutrition] = useState({});
     const [customNutrients, setCustomNutrients] = useState([]);
     const profile = JSON.parse(localStorage.getItem('userProfile') || '{}');
     const rda = getPersonalizedRDA(profile);
     const rdaMap = rda.reduce((acc, item) => {
-        acc[item.nutrient] = parseFloat(item.value) || 1;
+        const nutrientName = item.nutrient.split(' (')[0];
+        acc[nutrientName] = parseFloat(item.value) || 1;
         return acc;
     }, {});
 
@@ -646,13 +693,13 @@ const MealConstantCreator = ({ saveConstants, mealConstants }) => {
         Object.entries(nutrition).forEach(([key, value]) => {
             if (value && parseFloat(value) > 0) {
                 const nutrientInfo = ALL_NUTRIENTS.find(n => n.name === key);
-                finalNutrition[`${key} (${nutrientInfo.defaultUnit})`] = parseFloat(value);
+                finalNutrition[`${key}`] = `${value} ${nutrientInfo.defaultUnit}`;
             }
         });
 
         customNutrients.forEach(cust => {
             if (cust.name && cust.value > 0) {
-                finalNutrition[`${cust.name} (${cust.unit})`] = cust.value;
+                finalNutrition[`${cust.name}`] = `${cust.value} ${cust.unit}`;
             }
         });
 
@@ -663,11 +710,19 @@ const MealConstantCreator = ({ saveConstants, mealConstants }) => {
 
         const newConstant = {
             name: keyword,
-            items: ["Custom Shortcut"],
+            items: type === 'meal' ? ["Custom Shortcut"] : [],
+            dose: type === 'supplement' ? "1 serving" : undefined,
             nutrition: finalNutrition
         };
-        const newConstants = { ...mealConstants, [keyword.toLowerCase()]: newConstant };
-        saveConstants(newConstants);
+
+        if (type === 'meal') {
+            const newConstants = { ...mealConstants, [keyword.toLowerCase()]: newConstant };
+            saveMealConstants(newConstants);
+        } else {
+            const newConstants = { ...supplementConstants, [keyword.toLowerCase()]: newConstant };
+            saveSupplementConstants(newConstants);
+        }
+
         alert(`Shortcut '${keyword}' saved!`);
         setKeyword('');
         setNutrition({});
@@ -676,12 +731,16 @@ const MealConstantCreator = ({ saveConstants, mealConstants }) => {
 
     return (
         <div className="space-y-2 p-2 bg-gray-200 dark:bg-gray-600 rounded-md mt-2">
-            <h3 className="font-semibold text-center">Create a Detailed Meal Shortcut</h3>
+            <div className="flex border-b border-gray-300 dark:border-gray-500">
+                <button onClick={() => setType('meal')} className={`flex-1 py-1 text-sm font-semibold ${type === 'meal' ? 'bg-indigo-500 text-white rounded-t-md' : ''}`}>Meal</button>
+                <button onClick={() => setType('supplement')} className={`flex-1 py-1 text-sm font-semibold ${type === 'supplement' ? 'bg-indigo-500 text-white rounded-t-md' : ''}`}>Supplement</button>
+            </div>
+            <h3 className="font-semibold text-center pt-2">Create a Detailed {type === 'meal' ? 'Meal' : 'Supplement'} Shortcut</h3>
             <input type="text" value={keyword} onChange={e => setKeyword(e.target.value)} placeholder="Shortcut Keyword (e.g., myproteinshake)" className="w-full p-2 border rounded-md bg-white dark:bg-gray-700"/>
             <div className="max-h-40 overflow-y-auto space-y-2 p-1">
                 {ALL_NUTRIENTS.map(({ name, units }) => (
                     <div key={name} className="grid grid-cols-12 gap-2 items-center">
-                        <label className="text-sm col-span-4">{name}</label>
+                        <label className="text-sm col-span-4">{name.split(' (')[0]}</label>
                         <input 
                             type="number"
                             placeholder="Value"
@@ -693,7 +752,7 @@ const MealConstantCreator = ({ saveConstants, mealConstants }) => {
                             {units.map(u => <option key={u}>{u}</option>)}
                         </select>
                         <span className="text-xs col-span-2 text-right">
-                            {Math.round(((parseFloat(nutrition[name]) || 0) / (rdaMap[name] || 1)) * 100)}%
+                            {Math.round(((parseFloat(nutrition[name]) || 0) / (rdaMap[name.split(' (')[0]] || 1)) * 100)}%
                         </span>
                     </div>
                 ))}
@@ -721,7 +780,10 @@ const DaySummary = ({ log }) => {
 
     const rda = getPersonalizedRDA(profile, activityLevel);
     const rdaMap = rda.reduce((acc, item) => {
-        acc[item.nutrient] = parseFloat(item.value) || 1;
+        acc[item.nutrient] = {
+            value: parseFloat(item.value) || 1,
+            unit: item.value.split(' ')[1] || ''
+        };
         return acc;
     }, {});
 
@@ -730,12 +792,12 @@ const DaySummary = ({ log }) => {
 
     (log.meals || []).forEach(meal => {
         for (const [key, value] of Object.entries(meal.nutrition)) {
-            if (totals[key] !== undefined) totals[key] += value;
+            if (totals[key] !== undefined) totals[key] += parseFloat(value) || 0;
         }
     });
     (log.supplements || []).forEach(sup => {
         for (const [key, value] of Object.entries(sup.nutrition)) {
-            if (totals[key] !== undefined) totals[key] += value;
+            if (totals[key] !== undefined) totals[key] += parseFloat(value) || 0;
         }
     });
     
@@ -765,13 +827,14 @@ const DaySummary = ({ log }) => {
 
             <div className="grid grid-cols-3 sm:grid-cols-4 gap-4">
                 {Object.entries(totals).map(([nutrient, total]) => {
-                    const goal = rdaMap[nutrient] || 1;
+                    const goal = rdaMap[nutrient]?.value || 1;
+                    const unit = rdaMap[nutrient]?.unit || '';
                     const percent = Math.min(Math.round((total / goal) * 100), 100);
                     return (
                         <div key={nutrient} className="flex flex-col items-center">
                             <DonutChart percentage={percent} />
                             <p className="text-xs font-semibold mt-2 text-center">{nutrient.split(' (')[0]}</p>
-                            <p className="text-xs text-gray-500 dark:text-gray-400">{Math.round(total)}/{goal}</p>
+                            <p className="text-xs text-gray-500 dark:text-gray-400">{Math.round(total)}/{goal} {unit}</p>
                         </div>
                     )
                 })}
@@ -796,14 +859,31 @@ const DonutChart = ({ percentage }) => {
 // --- Edit Modal Component ---
 const EditModal = ({ item, onSave, onClose }) => {
     const [editedItem, setEditedItem] = useState(JSON.parse(JSON.stringify(item)));
+    const [customNutrients, setCustomNutrients] = useState([]);
 
     const handleNutritionChange = (key, value) => {
         const newNutrition = { ...editedItem.nutrition, [key]: parseFloat(value) || 0 };
         setEditedItem({ ...editedItem, nutrition: newNutrition });
     };
 
+    const handleCustomNutrientChange = (index, field, value) => {
+        const updated = [...customNutrients];
+        updated[index][field] = value;
+        setCustomNutrients(updated);
+    };
+
+    const addCustomNutrient = () => {
+        setCustomNutrients([...customNutrients, { name: '', value: 0, unit: 'g' }]);
+    };
+
     const handleSave = () => {
-        onSave(editedItem);
+        const finalNutrition = { ...editedItem.nutrition };
+        customNutrients.forEach(cust => {
+            if (cust.name && cust.value > 0) {
+                finalNutrition[`${cust.name} (${cust.unit})`] = cust.value;
+            }
+        });
+        onSave({ ...editedItem, nutrition: finalNutrition });
     };
 
     return (
@@ -816,13 +896,23 @@ const EditModal = ({ item, onSave, onClose }) => {
                             <label className="text-sm font-medium text-gray-700 dark:text-gray-300">{key}</label>
                             <input 
                                 type="number" 
-                                value={value}
+                                value={parseFloat(value) || ''}
                                 onChange={(e) => handleNutritionChange(key, e.target.value)}
                                 className="w-1/2 p-1 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700"
                             />
                         </div>
                     ))}
+                    {customNutrients.map((cust, index) => (
+                         <div key={index} className="grid grid-cols-12 gap-2 items-center">
+                            <input type="text" placeholder="Nutrient" value={cust.name} onChange={e => handleCustomNutrientChange(index, 'name', e.target.value)} className="text-sm col-span-5 p-1 border rounded-md bg-white dark:bg-gray-700"/>
+                            <input type="number" placeholder="Value" value={cust.value} onChange={e => handleCustomNutrientChange(index, 'value', e.target.value)} className="w-full p-1 border rounded-md col-span-4 bg-white dark:bg-gray-700"/>
+                            <select value={cust.unit} onChange={e => handleCustomNutrientChange(index, 'unit', e.target.value)} className="text-xs p-1 border rounded-md col-span-3 bg-white dark:bg-gray-700">
+                                <option>g</option><option>mg</option><option>µg</option><option>kcal</option><option>IU</option>
+                            </select>
+                        </div>
+                    ))}
                 </div>
+                <button onClick={addCustomNutrient} className="w-full text-sm mt-2 bg-gray-500 text-white font-semibold py-1 px-3 rounded-md hover:bg-gray-600">Add Custom Nutrient</button>
                 <div className="flex justify-end gap-4 mt-6">
                     <button onClick={onClose} className="bg-gray-300 dark:bg-gray-600 text-gray-800 dark:text-gray-200 font-semibold py-2 px-4 rounded-md hover:bg-gray-400">Cancel</button>
                     <button onClick={handleSave} className="bg-indigo-600 text-white font-semibold py-2 px-4 rounded-md hover:bg-indigo-700">Save</button>
@@ -846,12 +936,12 @@ const ActivityCalendar = ({ dailyLog }) => {
 
         const totals = { calories: 0, protein: 0 };
         (log.meals || []).forEach(meal => {
-            totals.calories += meal.nutrition.Calories || 0;
-            totals.protein += meal.nutrition['Protein (g)'] || 0;
+            totals.calories += parseFloat(meal.nutrition.Energy) || 0;
+            totals.protein += parseFloat(meal.nutrition['Protein']) || 0;
         });
         (log.supplements || []).forEach(sup => {
-            totals.calories += sup.nutrition.Calories || 0;
-            totals.protein += sup.nutrition['Protein (g)'] || 0;
+            totals.calories += parseFloat(sup.nutrition.Energy) || 0;
+            totals.protein += parseFloat(sup.nutrition['Protein']) || 0;
         });
 
         const caloriePercent = (totals.calories / rda.calories) * 100;
@@ -1004,7 +1094,7 @@ const SupplementAdvisor = () => {
         const prompt = `I am a ${profileData.age}-year-old male in ${profileData.location} (${profileData.height}cm, ${profileData.weight}kg). I am looking for a supplement for "${query}". Please suggest a specific, commercially available product in India (like Becosules, Shelcal, etc.). Explain why it's a good choice and give the typical dosage. Keep the response concise and practical.`;
         
         const result = await (async () => {
-            const apiKey = process.env.REACT_APP_GEMINI_API_KEY;
+            const apiKey = "";
             const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-05-20:generateContent?key=${apiKey}`;
             const payload = { contents: [{ role: "user", parts: [{ text: prompt }] }] };
             try {
@@ -1084,7 +1174,7 @@ const MealAdvisor = () => {
         }
 
         const result = await (async () => {
-            const apiKey = process.env.REACT_APP_GEMINI_API_KEY;
+            const apiKey = "";
             const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-05-20:generateContent?key=${apiKey}`;
             const payload = { contents: [{ role: "user", parts: [{ text: prompt }, { inlineData: { mimeType: "image/jpeg", data: menuImage } }] }] };
             try {
@@ -1150,7 +1240,7 @@ const getPersonalizedRDA = (profile, activityLevel = 'moderate') => {
         return acc;
     }, {});
 
-    // Update with known values
+    // Update with known values from ICMR
     Object.assign(baseRDA, {
         'Energy': { value: 2710, unit: 'kcal' },
         'Protein': { value: 0.83, unit: 'g', perKg: true },
@@ -1158,11 +1248,22 @@ const getPersonalizedRDA = (profile, activityLevel = 'moderate') => {
         'Fat': { value: 1, unit: 'g', perKg: true },
         'Vitamin A': { value: 1000, unit: 'µg' },
         'Vitamin D': { value: 15, unit: 'µg' },
+        'Vitamin E': { value: 10, unit: 'mg' },
         'Vitamin C': { value: 82, unit: 'mg' },
+        'Vitamin B1 (Thiamine)': { value: 2.2, unit: 'mg' },
+        'Vitamin B2 (Riboflavin)': { value: 3.1, unit: 'mg' },
+        'Vitamin B3 (Niacin)': { value: 22, unit: 'mg' },
+        'Vitamin B6': { value: 3.0, unit: 'mg' },
+        'Vitamin B12': { value: 2.5, unit: 'µg' },
         'Calcium (Ca)': { value: 1050, unit: 'mg' },
         'Iron (Fe)': { value: 26, unit: 'mg' },
         'Zinc (Zn)': { value: 17.6, unit: 'mg' },
-        'Vitamin B12': { value: 2.5, unit: 'µg' },
+        'Magnesium (Mg)': { value: 385, unit: 'mg' },
+        'Sodium (Na)': { value: 2000, unit: 'mg' },
+        'Chloride': { value: 2300, unit: 'mg' },
+        'Iodine (I)': { value: 150, unit: 'µg' },
+        'Copper (Cu)': { value: 1.35, unit: 'mg' },
+        'Manganese (Mn)': { value: 4, unit: 'mg' },
     });
     
     const activityMultipliers = {
