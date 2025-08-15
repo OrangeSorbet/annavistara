@@ -521,7 +521,7 @@ const MealTrackerPage = () => {
                         <label htmlFor="meal-image" className="w-full flex items-center justify-center gap-2 bg-indigo-600 text-white font-semibold py-2 px-4 rounded-md hover:bg-indigo-700 cursor-pointer">
                             <CameraIcon /> Upload Meal Photo
                         </label>
-                        <input type="file" id="meal-image" className="hidden" accept="image/*" onChange={e => analyzeMeal("the meal in the image", e.target.files[0])} />
+                        <input type="file" id="meal-image" className="hidden" accept="image/*" onChange={e => { const file = e.target.files[0]; if (file) { const reader = new FileReader(); reader.onloadend = () => analyzeMeal("the meal in the image", reader.result.split(',')[1]); reader.readAsDataURL(file); } }} />
                     </div>
                 )}
 
