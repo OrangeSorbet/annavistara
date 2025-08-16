@@ -1,22 +1,4 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-// Note for deployment: The Excel export functionality requires the 'xlsx' library.
-// Please include the following script tag in your main HTML file's <head> section:
-// <script src="https://cdn.jsdelivr.net/npm/xlsx/dist/xlsx.full.min.js"></script>
-
-// --- IMPORTANT FOR DARK MODE ---
-// For Dark Mode to work, you MUST update your `tailwind.config.js` file.
-// It should look like this:
-// module.exports = {
-//   darkMode: 'class', // This line is essential
-//   content: [
-//     "./src/**/*.{js,jsx,ts,tsx}",
-//   ],
-//   theme: {
-//     extend: {},
-//   },
-//   plugins: [],
-// }
-
 
 // --- Helper Icons (No SVG used) ---
 const CameraIcon = () => <span role="img" aria-label="camera">📷</span>;
@@ -486,7 +468,7 @@ const MealTrackerPage = () => {
     };
     
     const callGeminiApiForAnalysis = async (prompt, base64ImageData = null) => {
-        const apiKey = "process.env.REACT_APP_GEMINI_API_KEY"; // API key will be injected by the environment
+        const apiKey = process.env.REACT_APP_GEMINI_API_KEY; // API key will be injected by the environment
         const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-05-20:generateContent?key=${apiKey}`;
         let parts = [{ text: prompt }];
         if (base64ImageData) {
@@ -1151,7 +1133,7 @@ const AdvisorPage = () => {
     return (
         <div>
             <h1 className="text-3xl font-bold text-indigo-600 dark:text-indigo-400 mb-6 text-center">AI Advisor</h1>
-             <div className="flex border-b border-gray-200 dark:border-gray-700 mb-4">
+            <div className="flex border-b border-gray-200 dark:border-gray-700 mb-4">
                 <button onClick={() => setActiveTab('supplements')} className={`flex-1 py-2 text-center font-semibold flex items-center justify-center gap-2 ${activeTab === 'supplements' ? 'border-b-2 border-indigo-600 text-indigo-600 dark:text-indigo-400' : 'text-gray-500 dark:text-gray-400'}`}><PillIcon /> Supplements</button>
                 <button onClick={() => setActiveTab('meals')} className={`flex-1 py-2 text-center font-semibold flex items-center justify-center gap-2 ${activeTab === 'meals' ? 'border-b-2 border-indigo-600 text-indigo-600 dark:text-indigo-400' : 'text-gray-500 dark:text-gray-400'}`}><FoodIcon /> Meal Advisor</button>
             </div>
@@ -1170,34 +1152,38 @@ const SupplementAdvisor = () => {
         if (!query) return;
         setIsLoading(true);
         setSuggestion('');
+
         const profileData = JSON.parse(localStorage.getItem('userProfile') || '{}');
-        if (Object.values(profileData).some(field => field === '')) {
-            alert("Please complete all fields in your profile before using AI features.");
+
+        // Check for missing fields
+        const missingFields = ['age', 'height', 'weight', 'location'].filter(f => !profileData[f]);
+        if (missingFields.length > 0) {
+            alert(`Please complete all fields in your profile (${missingFields.join(', ')}) before using AI features.`);
+            setIsLoading(false);
             return;
         }
+
         const prompt = `I am a ${profileData.age}-year-old male in ${profileData.location} (${profileData.height}cm, ${profileData.weight}kg). I am looking for a supplement for "${query}". Please suggest a specific, commercially available product in ${profileData.location} (like Becosules, Shelcal, etc.). Explain why it's a good choice and give the typical dosage. Keep the response concise and practical.`;
-        
-        const result = await (async () => {
+
+        try {
             const apiKey = "process.env.REACT_APP_GEMINI_API_KEY";
             const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-05-20:generateContent?key=${apiKey}`;
             const payload = { contents: [{ role: "user", parts: [{ text: prompt }] }] };
-            try {
-                const response = await fetch(apiUrl, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(payload)
-                });
-                if (!response.ok) throw new Error(`API Error: ${response.statusText}`);
-                const result = await response.json();
-                return result.candidates[0].content.parts[0].text;
-            } catch (error) {
-                console.error("Gemini API call failed:", error);
-                return "Error: Could not get a suggestion.";
-            }
-        })();
 
-        setSuggestion(result);
-        setIsLoading(false);
+            const response = await fetch(apiUrl, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            });
+            if (!response.ok) throw new Error(`API Error: ${response.statusText}`);
+            const result = await response.json();
+            setSuggestion(result.candidates[0].content.parts[0].text);
+        } catch (error) {
+            console.error("Gemini API call failed:", error);
+            setSuggestion("Error: Could not get a suggestion.");
+        } finally {
+            setIsLoading(false);
+        }
     };
 
     return (
@@ -1214,7 +1200,7 @@ const SupplementAdvisor = () => {
                     <p className="whitespace-pre-wrap">{suggestion}</p>
                 </div>
             )}
-             <p className="text-xs text-gray-500 mt-4 text-center">Disclaimer: This is an AI-generated suggestion. Always consult with a healthcare professional before starting any new supplement.</p>
+            <p className="text-xs text-gray-500 mt-4 text-center">Disclaimer: This is an AI-generated suggestion. Always consult with a healthcare professional before starting any new supplement.</p>
         </div>
     );
 };
@@ -1240,14 +1226,18 @@ const MealAdvisor = () => {
             alert("Please enter a budget.");
             return;
         }
+
         setIsLoading(true);
         setSuggestion('');
 
         const profileData = JSON.parse(localStorage.getItem('userProfile') || '{}');
-        if (Object.values(profileData).some(field => field === '')) {
-            alert("Please complete all fields in your profile before using AI features.");
+        const missingFields = ['age', 'height', 'weight', 'location'].filter(f => !profileData[f]);
+        if (missingFields.length > 0) {
+            alert(`Please complete all fields in your profile (${missingFields.join(', ')}) before using AI features.`);
+            setIsLoading(false);
             return;
         }
+
         let prompt;
         if (adviceType === 'diet') {
             prompt = `I am a ${profileData.age}-year-old male (${profileData.height}cm, ${profileData.weight}kg) aiming for muscle gain. Based on the attached restaurant menu image, suggest the most diet-friendly and high-protein meal option available. Explain your choice briefly.`;
@@ -1255,27 +1245,25 @@ const MealAdvisor = () => {
             prompt = `I am a ${profileData.age}-year-old male (${profileData.height}cm, ${profileData.weight}kg) aiming for muscle gain. Based on the attached restaurant menu image, suggest the best value-for-money, high-protein meal option that fits within a budget of INR ${budget}. Explain your choice briefly.`;
         }
 
-        const result = await (async () => {
+        try {
             const apiKey = "process.env.REACT_APP_GEMINI_API_KEY";
             const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-05-20:generateContent?key=${apiKey}`;
             const payload = { contents: [{ role: "user", parts: [{ text: prompt }, { inlineData: { mimeType: "image/jpeg", data: base64Image } }] }] };
-            try {
-                const response = await fetch(apiUrl, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(payload)
-                });
-                if (!response.ok) throw new Error(`API Error: ${response.statusText}`);
-                const result = await response.json();
-                return result.candidates[0].content.parts[0].text;
-            } catch (error) {
-                console.error("Gemini API call failed:", error);
-                return "Error: Could not get a suggestion.";
-            }
-        })();
-        
-        setSuggestion(result);
-        setIsLoading(false);
+
+            const response = await fetch(apiUrl, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            });
+            if (!response.ok) throw new Error(`API Error: ${response.statusText}`);
+            const result = await response.json();
+            setSuggestion(result.candidates[0].content.parts[0].text);
+        } catch (error) {
+            console.error("Gemini API call failed:", error);
+            setSuggestion("Error: Could not get a suggestion.");
+        } finally {
+            setIsLoading(false);
+        }
     };
 
     return (
