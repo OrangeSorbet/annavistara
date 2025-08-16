@@ -1,4 +1,22 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
+// Note for deployment: The Excel export functionality requires the 'xlsx' library.
+// Please include the following script tag in your main HTML file's <head> section:
+// <script src="https://cdn.jsdelivr.net/npm/xlsx/dist/xlsx.full.min.js"></script>
+
+// --- IMPORTANT FOR DARK MODE ---
+// For Dark Mode to work, you MUST update your `tailwind.config.js` file.
+// It should look like this:
+// module.exports = {
+//   darkMode: 'class', // This line is essential
+//   content: [
+//     "./src/**/*.{js,jsx,ts,tsx}",
+//   ],
+//   theme: {
+//     extend: {},
+//   },
+//   plugins: [],
+// }
+
 
 // --- Helper Icons (No SVG used) ---
 const CameraIcon = () => <span role="img" aria-label="camera">📷</span>;
@@ -213,11 +231,6 @@ const ProfilePage = () => {
 
         const dailyLog = JSON.parse(localStorage.getItem('dailyLog') || '{}');
         const profile = JSON.parse(localStorage.getItem('userProfile') || '{}');
-        const rda = getPersonalizedRDA(profile);
-        const rdaMap = rda.reduce((acc, item) => {
-            acc[item.nutrient] = parseFloat(item.value);
-            return acc;
-        }, {});
 
         if (Object.keys(dailyLog).length === 0) {
             alert("No data to export!");
@@ -225,49 +238,78 @@ const ProfilePage = () => {
         }
 
         const wb = window.XLSX.utils.book_new();
+        const currentYear = new Date().getFullYear();
+        const ws_data = [];
 
-        Object.keys(dailyLog).sort().forEach(date => {
-            const dayData = dailyLog[date];
-            const ws_data = [];
-            const totals = {};
+        // Create Header Row with Day and Month
+        const header = ["Day", "Month", "Item", "Details", ...ALL_NUTRIENTS.map(n => n.name)];
+        ws_data.push(header);
 
-            // Initialize totals
-            rda.forEach(item => { totals[item.nutrient] = 0; });
+        // Get and sort dates
+        const sortedDates = Object.keys(dailyLog).sort();
 
-            ws_data.push(["Item", "Details", ...rda.map(i => i.nutrient)]);
-            
-            dayData.meals.forEach(meal => {
-                const row = [meal.name, meal.items.join(', ')];
-                rda.forEach(item => {
-                    const value = parseFloat(meal.nutrition[item.nutrient]) || 0;
-                    row.push(value);
-                    totals[item.nutrient] += value;
+        // Group logs by month
+        const groupedByMonth = sortedDates.reduce((acc, date) => {
+            const month = new Date(date).toLocaleString('default', { month: 'long', year: 'numeric' });
+            if (!acc[month]) {
+                acc[month] = [];
+            }
+            acc[month].push(date);
+            return acc;
+        }, {});
+
+        // Process each month
+        Object.keys(groupedByMonth).forEach(month => {
+            // Add a month header row
+            ws_data.push([month]);
+
+            groupedByMonth[month].forEach(date => {
+                const dayData = dailyLog[date];
+                const dateObj = new Date(date);
+                const day = dateObj.getDate();
+                const monthName = dateObj.toLocaleString('default', { month: 'long' });
+                
+                const rda = getPersonalizedRDA(profile);
+                const rdaMap = rda.reduce((acc, item) => {
+                    acc[item.nutrient] = parseFloat(item.value) || 1;
+                    return acc;
+                }, {});
+
+                const dateTotals = {};
+                rda.forEach(item => { dateTotals[item.nutrient] = 0; });
+
+                // Add Meal and Supplement Rows for the date
+                [...(dayData.meals || []), ...(dayData.supplements || [])].forEach(item => {
+                    const isMeal = !!item.items;
+                    const row = [
+                        day,
+                        monthName,
+                        item.name,
+                        isMeal ? item.items.join(', ') : item.dose
+                    ];
+                    ALL_NUTRIENTS.forEach(nutrient => {
+                        const value = parseFloat(item.nutrition[nutrient.name]) || 0;
+                        row.push(value);
+                        dateTotals[nutrient.name] += value;
+                    });
+                    ws_data.push(row);
                 });
-                ws_data.push(row);
-            });
-            
-            dayData.supplements.forEach(sup => {
-                const row = [sup.name, sup.dose];
-                rda.forEach(item => {
-                    const value = parseFloat(sup.nutrition[item.nutrient]) || 0;
-                    row.push(value);
-                    totals[item.nutrient] += value;
-                });
-                ws_data.push(row);
-            });
 
-            ws_data.push([]); // Spacer
-            const totalsRow = ["", "Total", ...rda.map(item => totals[item.nutrient])];
-            const rdaRow = ["", "RDA", ...rda.map(item => rdaMap[item.nutrient])];
-            const percentRow = ["", "% RDA Met", ...rda.map(item => `${Math.round((totals[item.nutrient] / (rdaMap[item.nutrient] || 1)) * 100)}%`)];
-            
-            ws_data.push(totalsRow, rdaRow, percentRow);
-
-            const ws = window.XLSX.utils.aoa_to_sheet(ws_data);
-            window.XLSX.utils.book_append_sheet(wb, ws, date);
+                // Add summary rows for the date
+                const rdaRow = [day, monthName, "RDA", "", ...ALL_NUTRIENTS.map(n => rdaMap[n.name] || 0)];
+                const percentRow = [day, monthName, "% RDA Achieved", "", ...ALL_NUTRIENTS.map(n => `${Math.round((dateTotals[n.name] / (rdaMap[n.name] || 1)) * 100)}%`)];
+                
+                ws_data.push(rdaRow, percentRow);
+                ws_data.push([]); // Spacer row
+            });
         });
 
-        window.XLSX.writeFile(wb, "Nutrition_Log.xlsx");
+        const ws = window.XLSX.utils.aoa_to_sheet(ws_data);
+        ws['!autofilter'] = { ref: "A1:" + window.XLSX.utils.encode_col(header.length - 1) + "1" };
+        window.XLSX.utils.book_append_sheet(wb, ws, String(currentYear));
+
+        const fileName = `Annavistara-${profile.name || 'user'}.xlsx`;
+        window.XLSX.writeFile(wb, fileName);
     };
 
     return (
@@ -407,7 +449,7 @@ const MealTrackerPage = () => {
         setLoadingMessage(`Analyzing ${supplementName}...`);
 
         try {
-            const analysisPrompt = `Act as a nutritional database. Provide a highly accurate and detailed nutritional information for the supplement "${supplementName}" with a dose of "${supplementDose}". Include an exhaustive list of all possible macros and micronutrients. The final 'name' in the JSON should be the corrected, official product name. Format the response as a valid JSON object only, like this: {"name": "Official Product Name", "dose": "${supplementDose}", "nutrition": {"Calories": 0, "Protein (g)": 0, "Carbs (g)": 0, "Fat (g)": 0, "Vitamin C (mg)": 40, "Zinc (mg)": 10}}. If a nutrient isn't present, omit it.`;
+            const analysisPrompt = `Act as a nutritional database. Provide a highly accurate and detailed nutritional information for the supplement "${supplementName}" with a dose of "${supplementDose}". Include an exhaustive list of all possible macros and micronutrients. The final 'name' in the JSON should be the corrected, official product name. Format the response as a valid JSON object only, like this: {"name": "Official Product Name", "dose": "${supplementDose}", "nutrition": {"Energy": 0, "Protein": 0, "Carbohydrates": 0, "Fat": 0, "Vitamin C": 40, "Zinc (Zn)": 10}}. If a nutrient isn't present, omit it.`;
             let resultText = await callGeminiApiForAnalysis(analysisPrompt);
             const parsedResult = JSON.parse((resultText.match(/\{[\s\S]*\}/) || ['{}'])[0]);
 
@@ -468,7 +510,7 @@ const MealTrackerPage = () => {
     };
     
     const callGeminiApiForAnalysis = async (prompt, base64ImageData = null) => {
-        const apiKey = process.env.REACT_APP_GEMINI_API_KEY; // API key will be injected by the environment
+        const apiKey = process.env.REACT_APP_GEMINI_API_KEY;
         const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-05-20:generateContent?key=${apiKey}`;
         let parts = [{ text: prompt }];
         if (base64ImageData) {
@@ -493,7 +535,7 @@ const MealTrackerPage = () => {
         setAnalysisResult(null);
 
         try {
-            const analysisPrompt = `Analyze the following meal for a ${profileData.age}-year-old male (${profileData.height}cm, ${profileData.weight}kg). Provide a detailed nutritional breakdown including an exhaustive list of macros (Calories, Protein, Carbs, Saturated Fat, Unsaturated Fat, Cholesterol) and key micronutrients (Vitamin C, B3, E, B5, A, B6, B2, B1, B12, Magnesium, Chloride, Sodium, Calcium, Iron, Zinc, Manganese, Copper, Iodine, Omega-3). Format the response as a valid JSON object only, like this: {"name": "Meal Name", "items": ["Item 1", "Item 2"], "nutrition": {"Calories": 0, "Protein (g)": 0, "Carbs (g)": 0, "Saturated Fat (g)": 0, "Unsaturated Fat (g)": 0, "Cholesterol (mg)": 0, "Vitamin C (mg)": 0, "Iron (mg)": 0}}. The meal is: ${description}`;
+            const analysisPrompt = `Analyze the following meal for a ${profileData.age}-year-old male (${profileData.height}cm, ${profileData.weight}kg). Provide a detailed nutritional breakdown including an exhaustive list of macros (Energy, Protein, Carbohydrates, Fat, Saturated Fat, Unsaturated Fat, Cholesterol) and key micronutrients (Vitamin C, B3, E, B5, A, B6, B2, B1, B12, Magnesium, Chloride, Sodium, Calcium, Iron, Zinc, Manganese, Copper, Iodine, Omega-3). Format the response as a valid JSON object only, like this: {"name": "Meal Name", "items": ["Item 1", "Item 2"], "nutrition": {"Energy": 0, "Protein": 0, "Carbohydrates": 0, "Saturated Fat": 0, "Unsaturated Fat": 0, "Cholesterol": 0, "Vitamin C": 0, "Iron (Fe)": 0}}. The meal is: ${description}`;
             
             let resultText = await callGeminiApiForAnalysis(analysisPrompt, image);
             const parsedResult = JSON.parse((resultText.match(/\{[\s\S]*\}/) || ['{}'])[0]);
@@ -946,7 +988,7 @@ const ActivityCalendar = ({ dailyLog, activityLevel }) => {
     };
 
     const handleDateClick = (day) => {
-        const dateString = new Date(date.getFullYear(), date.getMonth(), day).toISOString().split('T')[0];
+        const dateString = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
         setSelectedDateLog({
             date: dateString,
             log: dailyLog[dateString] || { meals: [], supplements: [] },
@@ -1006,33 +1048,39 @@ const LogDetailModal = ({ logData, onClose }) => {
     const { date, log, workRoutine } = logData;
     const profile = JSON.parse(localStorage.getItem('userProfile') || '{}');
     const rda = getPersonalizedRDA(profile, workRoutine);
+
+    // Map RDA for easy access
     const rdaMap = rda.reduce((acc, item) => {
-        acc[item.nutrient] = {
-            value: parseFloat(item.value) || 1,
-            unit: item.value.split(' ')[1] || ''
-        };
+        const [valueStr, unit] = item.value.split(' ');
+        acc[item.nutrient] = { value: parseFloat(valueStr) || 1, unit: unit || '' };
         return acc;
     }, {});
 
-    const totals = {};
-    rda.forEach(item => { totals[item.nutrient] = 0; });
+    // State for totals to allow dynamic updates
+    const [totals, setTotals] = React.useState({});
 
-    (log.meals || []).forEach(meal => {
-        for (const [key, value] of Object.entries(meal.nutrition)) {
-            if (totals[key] !== undefined) totals[key] += parseFloat(value) || 0;
-        }
-    });
-    (log.supplements || []).forEach(sup => {
-        for (const [key, value] of Object.entries(sup.nutrition)) {
-            if (totals[key] !== undefined) totals[key] += parseFloat(value) || 0;
-        }
-    });
+    // Update totals whenever log changes
+    React.useEffect(() => {
+        const totalsTemp = {};
+        rda.forEach(item => { totalsTemp[item.nutrient] = 0; });
+
+        [...(log.meals || []), ...(log.supplements || [])].forEach(item => {
+            for (const [key, value] of Object.entries(item.nutrition)) {
+                if (totalsTemp[key] !== undefined) totalsTemp[key] += parseFloat(value) || 0;
+            }
+        });
+
+        setTotals(totalsTemp);
+    }, [log, rda]);
 
     return (
         <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex justify-center items-center p-4">
             <div className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-xl w-full max-w-md">
                 <h2 className="text-xl font-bold mb-2">Details for {date}</h2>
-                <p className="text-sm text-gray-500 dark:text-gray-400 mb-4">Work Routine: <span className="font-semibold capitalize">{workRoutine}</span></p>
+                <p className="text-sm text-gray-500 dark:text-gray-400 mb-4">
+                    Work Routine: <span className="font-semibold capitalize">{workRoutine}</span>
+                </p>
+
                 <div className="max-h-64 overflow-y-auto space-y-4">
                     <div>
                         <h3 className="font-semibold mb-2">Nutrient Summary</h3>
@@ -1041,6 +1089,7 @@ const LogDetailModal = ({ logData, onClose }) => {
                                 const goal = rdaMap[nutrient]?.value || 1;
                                 const unit = rdaMap[nutrient]?.unit || '';
                                 const percent = Math.min(Math.round((total / goal) * 100), 100);
+
                                 return (
                                     <div key={nutrient}>
                                         <div className="flex justify-between text-xs font-medium">
@@ -1051,17 +1100,22 @@ const LogDetailModal = ({ logData, onClose }) => {
                                             <div className="bg-indigo-600 h-2 rounded-full" style={{ width: `${percent}%` }}></div>
                                         </div>
                                     </div>
-                                )
+                                );
                            })}
                         </div>
                     </div>
                 </div>
-                <button onClick={onClose} className="w-full mt-6 bg-indigo-600 text-white font-semibold py-2 px-4 rounded-md hover:bg-indigo-700">Close</button>
+
+                <button
+                    onClick={onClose}
+                    className="w-full mt-6 bg-indigo-600 text-white font-semibold py-2 px-4 rounded-md hover:bg-indigo-700"
+                >
+                    Close
+                </button>
             </div>
         </div>
     );
 };
-
 
 // --- RDA Page Component ---
 const RdaPage = () => {
@@ -1133,7 +1187,7 @@ const AdvisorPage = () => {
     return (
         <div>
             <h1 className="text-3xl font-bold text-indigo-600 dark:text-indigo-400 mb-6 text-center">AI Advisor</h1>
-            <div className="flex border-b border-gray-200 dark:border-gray-700 mb-4">
+             <div className="flex border-b border-gray-200 dark:border-gray-700 mb-4">
                 <button onClick={() => setActiveTab('supplements')} className={`flex-1 py-2 text-center font-semibold flex items-center justify-center gap-2 ${activeTab === 'supplements' ? 'border-b-2 border-indigo-600 text-indigo-600 dark:text-indigo-400' : 'text-gray-500 dark:text-gray-400'}`}><PillIcon /> Supplements</button>
                 <button onClick={() => setActiveTab('meals')} className={`flex-1 py-2 text-center font-semibold flex items-center justify-center gap-2 ${activeTab === 'meals' ? 'border-b-2 border-indigo-600 text-indigo-600 dark:text-indigo-400' : 'text-gray-500 dark:text-gray-400'}`}><FoodIcon /> Meal Advisor</button>
             </div>
@@ -1152,38 +1206,30 @@ const SupplementAdvisor = () => {
         if (!query) return;
         setIsLoading(true);
         setSuggestion('');
-
         const profileData = JSON.parse(localStorage.getItem('userProfile') || '{}');
-
-        // Check for missing fields
-        const missingFields = ['age', 'height', 'weight', 'location'].filter(f => !profileData[f]);
-        if (missingFields.length > 0) {
-            alert(`Please complete all fields in your profile (${missingFields.join(', ')}) before using AI features.`);
-            setIsLoading(false);
-            return;
-        }
-
-        const prompt = `I am a ${profileData.age}-year-old male in ${profileData.location} (${profileData.height}cm, ${profileData.weight}kg). I am looking for a supplement for "${query}". Please suggest a specific, commercially available product in ${profileData.location} (like Becosules, Shelcal, etc.). Explain why it's a good choice and give the typical dosage. Keep the response concise and practical.`;
-
-        try {
-            const apiKey = "process.env.REACT_APP_GEMINI_API_KEY";
+        const prompt = `I am a ${profileData.age}-year-old male in ${profileData.location} (${profileData.height}cm, ${profileData.weight}kg). I am looking for a supplement for "${query}". Please suggest a specific, commercially available product in India (like Becosules, Shelcal, etc.). Explain why it's a good choice and give the typical dosage. Keep the response concise and practical.`;
+        
+        const result = await (async () => {
+            const apiKey = "";
             const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-05-20:generateContent?key=${apiKey}`;
             const payload = { contents: [{ role: "user", parts: [{ text: prompt }] }] };
+            try {
+                const response = await fetch(apiUrl, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                if (!response.ok) throw new Error(`API Error: ${response.statusText}`);
+                const result = await response.json();
+                return result.candidates[0].content.parts[0].text;
+            } catch (error) {
+                console.error("Gemini API call failed:", error);
+                return "Error: Could not get a suggestion.";
+            }
+        })();
 
-            const response = await fetch(apiUrl, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(payload)
-            });
-            if (!response.ok) throw new Error(`API Error: ${response.statusText}`);
-            const result = await response.json();
-            setSuggestion(result.candidates[0].content.parts[0].text);
-        } catch (error) {
-            console.error("Gemini API call failed:", error);
-            setSuggestion("Error: Could not get a suggestion.");
-        } finally {
-            setIsLoading(false);
-        }
+        setSuggestion(result);
+        setIsLoading(false);
     };
 
     return (
@@ -1200,7 +1246,7 @@ const SupplementAdvisor = () => {
                     <p className="whitespace-pre-wrap">{suggestion}</p>
                 </div>
             )}
-            <p className="text-xs text-gray-500 mt-4 text-center">Disclaimer: This is an AI-generated suggestion. Always consult with a healthcare professional before starting any new supplement.</p>
+             <p className="text-xs text-gray-500 mt-4 text-center">Disclaimer: This is an AI-generated suggestion. Always consult with a healthcare professional before starting any new supplement.</p>
         </div>
     );
 };
@@ -1226,18 +1272,10 @@ const MealAdvisor = () => {
             alert("Please enter a budget.");
             return;
         }
-
         setIsLoading(true);
         setSuggestion('');
 
         const profileData = JSON.parse(localStorage.getItem('userProfile') || '{}');
-        const missingFields = ['age', 'height', 'weight', 'location'].filter(f => !profileData[f]);
-        if (missingFields.length > 0) {
-            alert(`Please complete all fields in your profile (${missingFields.join(', ')}) before using AI features.`);
-            setIsLoading(false);
-            return;
-        }
-
         let prompt;
         if (adviceType === 'diet') {
             prompt = `I am a ${profileData.age}-year-old male (${profileData.height}cm, ${profileData.weight}kg) aiming for muscle gain. Based on the attached restaurant menu image, suggest the most diet-friendly and high-protein meal option available. Explain your choice briefly.`;
@@ -1245,25 +1283,27 @@ const MealAdvisor = () => {
             prompt = `I am a ${profileData.age}-year-old male (${profileData.height}cm, ${profileData.weight}kg) aiming for muscle gain. Based on the attached restaurant menu image, suggest the best value-for-money, high-protein meal option that fits within a budget of INR ${budget}. Explain your choice briefly.`;
         }
 
-        try {
-            const apiKey = "process.env.REACT_APP_GEMINI_API_KEY";
+        const result = await (async () => {
+            const apiKey = "";
             const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-05-20:generateContent?key=${apiKey}`;
             const payload = { contents: [{ role: "user", parts: [{ text: prompt }, { inlineData: { mimeType: "image/jpeg", data: base64Image } }] }] };
-
-            const response = await fetch(apiUrl, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(payload)
-            });
-            if (!response.ok) throw new Error(`API Error: ${response.statusText}`);
-            const result = await response.json();
-            setSuggestion(result.candidates[0].content.parts[0].text);
-        } catch (error) {
-            console.error("Gemini API call failed:", error);
-            setSuggestion("Error: Could not get a suggestion.");
-        } finally {
-            setIsLoading(false);
-        }
+            try {
+                const response = await fetch(apiUrl, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                if (!response.ok) throw new Error(`API Error: ${response.statusText}`);
+                const result = await response.json();
+                return result.candidates[0].content.parts[0].text;
+            } catch (error) {
+                console.error("Gemini API call failed:", error);
+                return "Error: Could not get a suggestion.";
+            }
+        })();
+        
+        setSuggestion(result);
+        setIsLoading(false);
     };
 
     return (
@@ -1304,7 +1344,19 @@ const ImageUploader = ({ onImageReady, title, onAnalyze, isDisabled }) => {
     const videoRef = useRef(null);
     const canvasRef = useRef(null);
 
+    const profileIncomplete = () => {
+        const profileData = JSON.parse(localStorage.getItem('userProfile') || '{}');
+        const missingFields = ['age', 'height', 'weight', 'location'].filter(f => !profileData[f]);
+        if (missingFields.length > 0) {
+            alert(`Please complete all fields in your profile (${missingFields.join(', ')}) before using AI features.`);
+            return true;
+        }
+        return false;
+    };
+
     const handleFile = (file) => {
+        if (profileIncomplete()) return;
+
         if (file && file.type.startsWith('image/')) {
             const reader = new FileReader();
             reader.onloadend = () => {
@@ -1319,20 +1371,12 @@ const ImageUploader = ({ onImageReady, title, onAnalyze, isDisabled }) => {
         }
     };
 
-    const handleDragOver = (e) => {
-        e.preventDefault();
-        setIsDragging(true);
-    };
-    const handleDragLeave = (e) => {
-        e.preventDefault();
-        setIsDragging(false);
-    };
-    const handleDrop = (e) => {
-        e.preventDefault();
-        setIsDragging(false);
-        handleFile(e.dataTransfer.files[0]);
-    };
+    const handleDragOver = (e) => { e.preventDefault(); setIsDragging(true); };
+    const handleDragLeave = (e) => { e.preventDefault(); setIsDragging(false); };
+    const handleDrop = (e) => { e.preventDefault(); setIsDragging(false); handleFile(e.dataTransfer.files[0]); };
     const handlePaste = useCallback((e) => {
+        if (profileIncomplete()) return;
+
         const items = e.clipboardData.items;
         for (let i = 0; i < items.length; i++) {
             if (items[i].type.indexOf('image') !== -1) {
@@ -1342,22 +1386,15 @@ const ImageUploader = ({ onImageReady, title, onAnalyze, isDisabled }) => {
         }
     }, []);
 
-    useEffect(() => {
-        window.addEventListener('paste', handlePaste);
-        return () => window.removeEventListener('paste', handlePaste);
-    }, [handlePaste]);
+    useEffect(() => { window.addEventListener('paste', handlePaste); return () => window.removeEventListener('paste', handlePaste); }, [handlePaste]);
 
     const startCamera = async () => {
+        if (profileIncomplete()) return;
         try {
             const stream = await navigator.mediaDevices.getUserMedia({ video: true });
-            if (videoRef.current) {
-                videoRef.current.srcObject = stream;
-            }
+            if (videoRef.current) videoRef.current.srcObject = stream;
             setShowModal(true);
-        } catch (err) {
-            console.error("Error accessing camera:", err);
-            alert("Could not access camera. Please ensure you have given permission.");
-        }
+        } catch (err) { alert("Could not access camera."); }
     };
 
     const captureImage = () => {
@@ -1385,35 +1422,16 @@ const ImageUploader = ({ onImageReady, title, onAnalyze, isDisabled }) => {
     return (
         <div className="mt-4">
             <div className="flex gap-2">
-                <button onClick={() => document.getElementById('file-upload').click()} className="w-1/2 bg-blue-500 text-white font-semibold py-2 px-4 rounded-md hover:bg-blue-600 disabled:bg-blue-300" disabled={isDisabled}>Select File</button>
-                <button onClick={startCamera} className="w-1/2 bg-green-500 text-white font-semibold py-2 px-4 rounded-md hover:bg-green-600 disabled:bg-green-300" disabled={isDisabled}>Use Camera</button>
+                <button onClick={() => document.getElementById('file-upload').click()} className="w-1/2 bg-blue-500 text-white font-semibold py-2 px-4 rounded-md hover:bg-blue-600" disabled={isDisabled}>Select File</button>
+                <button onClick={startCamera} className="w-1/2 bg-green-500 text-white font-semibold py-2 px-4 rounded-md hover:bg-green-600" disabled={isDisabled}>Use Camera</button>
             </div>
             <input type="file" id="file-upload" className="hidden" accept="image/*" onChange={(e) => handleFile(e.target.files[0])} />
 
-            <div 
-                onDragOver={handleDragOver} 
-                onDragLeave={handleDragLeave} 
-                onDrop={handleDrop}
-                className={`mt-4 p-4 border-2 border-dashed rounded-lg text-center transition-colors ${isDragging ? 'border-indigo-500 bg-indigo-50 dark:bg-indigo-900/50' : 'border-gray-300 dark:border-gray-600'}`}
-            >
-                <div className="relative">
-                    {imageSrc && <p className="font-semibold mb-2">Image Preview:</p>}
-                    {imageSrc ? (
-                        <img src={imageSrc} alt="Uploaded" className="max-h-48 mx-auto rounded-md" />
-                    ) : (
-                        <p>Drag & drop an image, or paste from clipboard (Ctrl+V)</p>
-                    )}
-                    {isDragging && (
-                        <div className="absolute inset-0 bg-indigo-500 bg-opacity-75 flex items-center justify-center rounded-lg">
-                            <p className="text-white text-2xl font-bold">Gimme that food</p>
-                        </div>
-                    )}
-                </div>
+            <div onDragOver={handleDragOver} onDragLeave={handleDragLeave} onDrop={handleDrop} className={`mt-4 p-4 border-2 border-dashed rounded-lg text-center transition-colors ${isDragging ? 'border-indigo-500 bg-indigo-50 dark:bg-indigo-900/50' : 'border-gray-300 dark:border-gray-600'}`}>
+                {imageSrc ? <img src={imageSrc} alt="Uploaded" className="max-h-48 mx-auto rounded-md" /> : <p>Drag & drop an image, or paste from clipboard (Ctrl+V)</p>}
             </div>
-            
-            {imageSrc && onAnalyze && (
-                <button onClick={() => onAnalyze(imageBase64)} className="w-full mt-4 bg-indigo-600 text-white font-semibold py-2 px-4 rounded-md hover:bg-indigo-700 disabled:bg-indigo-300" disabled={isDisabled}>Analyze Image</button>
-            )}
+
+            {imageSrc && onAnalyze && <button onClick={() => onAnalyze(imageBase64)} className="w-full mt-4 bg-indigo-600 text-white font-semibold py-2 px-4 rounded-md hover:bg-indigo-700" disabled={isDisabled}>Analyze Image</button>}
 
             {showModal && (
                 <div className="fixed inset-0 bg-black bg-opacity-75 z-50 flex flex-col items-center justify-center">
