@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 // Note for deployment: The Excel export functionality requires the 'xlsx' library.
 // Please include the following script tag in your main HTML file's <head> section:
 // <script src="https://cdn.jsdelivr.net/npm/xlsx/dist/xlsx.full.min.js"></script>
@@ -157,6 +157,7 @@ const BottomNav = ({ currentPage, setCurrentPage }) => {
 const ProfilePage = () => {
     const [profile, setProfile] = useState({ name: '', age: '', height: '', weight: '', location: 'India' });
     const [saved, setSaved] = useState(false);
+    const [restoreText, setRestoreText] = useState('');
 
     useEffect(() => {
         const storedProfile = localStorage.getItem('userProfile');
@@ -166,6 +167,10 @@ const ProfilePage = () => {
     }, []);
 
     const handleSave = () => {
+        if (Object.values(profile).some(field => field === '')) {
+            alert("Please fill out all profile fields before saving.");
+            return;
+        }
         localStorage.setItem('userProfile', JSON.stringify(profile));
         setSaved(true);
         setTimeout(() => setSaved(false), 2000);
@@ -191,30 +196,31 @@ const ProfilePage = () => {
         downloadAnchorNode.remove();
     };
 
-    const handleUploadData = (event) => {
-        const fileReader = new FileReader();
-        fileReader.onload = (e) => {
-            try {
-                const data = JSON.parse(e.target.result);
-                if (data.userProfile) {
-                    localStorage.setItem('userProfile', JSON.stringify(data.userProfile));
-                    setProfile(data.userProfile);
-                }
-                if (data.dailyLog) {
-                    localStorage.setItem('dailyLog', JSON.stringify(data.dailyLog));
-                }
-                if (data.mealConstants) {
-                    localStorage.setItem('mealConstants', JSON.stringify(data.mealConstants));
-                }
-                 if (data.supplementConstants) {
-                    localStorage.setItem('supplementConstants', JSON.stringify(data.supplementConstants));
-                }
-                alert('Data restored successfully!');
-            } catch (error) {
-                alert('Error reading file. Please make sure it is a valid backup file.');
+    const handleRestoreData = () => {
+        if (!restoreText) {
+            alert("Please paste your backup data into the text box.");
+            return;
+        }
+        try {
+            const data = JSON.parse(restoreText);
+            if (data.userProfile) {
+                localStorage.setItem('userProfile', JSON.stringify(data.userProfile));
+                setProfile(data.userProfile);
             }
-        };
-        fileReader.readAsText(event.target.files[0]);
+            if (data.dailyLog) {
+                localStorage.setItem('dailyLog', JSON.stringify(data.dailyLog));
+            }
+            if (data.mealConstants) {
+                localStorage.setItem('mealConstants', JSON.stringify(data.mealConstants));
+            }
+             if (data.supplementConstants) {
+                localStorage.setItem('supplementConstants', JSON.stringify(data.supplementConstants));
+            }
+            alert('Data restored successfully!');
+            setRestoreText('');
+        } catch (error) {
+            alert('Error parsing data. Please make sure you copied the entire JSON backup file.');
+        }
     };
     
     const handleExportToExcel = () => {
@@ -251,7 +257,7 @@ const ProfilePage = () => {
             dayData.meals.forEach(meal => {
                 const row = [meal.name, meal.items.join(', ')];
                 rda.forEach(item => {
-                    const value = meal.nutrition[item.nutrient] || 0;
+                    const value = parseFloat(meal.nutrition[item.nutrient]) || 0;
                     row.push(value);
                     totals[item.nutrient] += value;
                 });
@@ -261,7 +267,7 @@ const ProfilePage = () => {
             dayData.supplements.forEach(sup => {
                 const row = [sup.name, sup.dose];
                 rda.forEach(item => {
-                    const value = sup.nutrition[item.nutrient] || 0;
+                    const value = parseFloat(sup.nutrition[item.nutrient]) || 0;
                     row.push(value);
                     totals[item.nutrient] += value;
                 });
@@ -317,11 +323,17 @@ const ProfilePage = () => {
                      <button onClick={handleDownloadData} className="w-full flex items-center justify-center gap-2 bg-blue-500 text-white font-semibold py-2 px-4 rounded-md hover:bg-blue-600 transition-colors">
                          <DownloadIcon /> Download Backup
                      </button>
-                     <div>
-                        <label htmlFor="upload-button" className="w-full flex items-center justify-center gap-2 bg-green-500 text-white font-semibold py-2 px-4 rounded-md hover:bg-green-600 transition-colors cursor-pointer">
-                           <UploadIcon /> Restore from Backup
-                        </label>
-                        <input type="file" id="upload-button" className="hidden" accept=".json" onChange={handleUploadData} />
+                     <div className="space-y-2">
+                        <textarea 
+                            value={restoreText}
+                            onChange={e => setRestoreText(e.target.value)}
+                            placeholder="Paste your JSON backup data here..."
+                            className="w-full p-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700"
+                            rows="4"
+                        ></textarea>
+                         <button onClick={handleRestoreData} className="w-full flex items-center justify-center gap-2 bg-green-500 text-white font-semibold py-2 px-4 rounded-md hover:bg-green-600 transition-colors">
+                           <UploadIcon /> Restore from Text
+                        </button>
                      </div>
                       <button onClick={handleExportToExcel} className="w-full flex items-center justify-center gap-2 bg-emerald-600 text-white font-semibold py-2 px-4 rounded-md hover:bg-emerald-700 transition-colors">
                          <ExcelIcon /> Export to Excel
@@ -348,6 +360,7 @@ const MealTrackerPage = () => {
     const [supplementDose, setSupplementDose] = useState('');
     const [editingItem, setEditingItem] = useState(null);
     const [showConstantCreator, setShowConstantCreator] = useState(false);
+    const [activityLevel, setActivityLevel] = useState('moderate');
     
 
     useEffect(() => {
@@ -412,7 +425,7 @@ const MealTrackerPage = () => {
         setLoadingMessage(`Analyzing ${supplementName}...`);
 
         try {
-            const analysisPrompt = `Act as a nutritional database. Provide a highly accurate and detailed nutritional information for the supplement "${supplementName}" with a dose of "${supplementDose}". Include an exhaustive list of all possible macros and micronutrients. Format the response as a valid JSON object only, like this: {"name": "${supplementName}", "dose": "${supplementDose}", "nutrition": {"Calories": 0, "Protein (g)": 0, "Carbs (g)": 0, "Fat (g)": 0, "Vitamin C (mg)": 40, "Zinc (mg)": 10}}. If a nutrient isn't present, omit it.`;
+            const analysisPrompt = `Act as a nutritional database. Provide a highly accurate and detailed nutritional information for the supplement "${supplementName}" with a dose of "${supplementDose}". Include an exhaustive list of all possible macros and micronutrients. The final 'name' in the JSON should be the corrected, official product name. Format the response as a valid JSON object only, like this: {"name": "Official Product Name", "dose": "${supplementDose}", "nutrition": {"Calories": 0, "Protein (g)": 0, "Carbs (g)": 0, "Fat (g)": 0, "Vitamin C (mg)": 40, "Zinc (mg)": 10}}. If a nutrient isn't present, omit it.`;
             let resultText = await callGeminiApiForAnalysis(analysisPrompt);
             const parsedResult = JSON.parse((resultText.match(/\{[\s\S]*\}/) || ['{}'])[0]);
 
@@ -473,7 +486,7 @@ const MealTrackerPage = () => {
     };
     
     const callGeminiApiForAnalysis = async (prompt, base64ImageData = null) => {
-        const apiKey = ""; // API key will be injected by the environment
+        const apiKey = "process.env.REACT_APP_GEMINI_API_KEY"; // API key will be injected by the environment
         const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-05-20:generateContent?key=${apiKey}`;
         let parts = [{ text: prompt }];
         if (base64ImageData) {
@@ -487,12 +500,17 @@ const MealTrackerPage = () => {
     };
 
     const analyzeMeal = async (description, image) => {
+        const profileData = JSON.parse(localStorage.getItem('userProfile') || '{}');
+        if (Object.values(profileData).some(field => field === '')) {
+            alert("Please complete your profile before using AI features.");
+            return;
+        }
+
         setIsLoading(true);
         setLoadingMessage('Analyzing nutrition...');
         setAnalysisResult(null);
 
         try {
-            const profileData = JSON.parse(localStorage.getItem('userProfile') || '{}');
             const analysisPrompt = `Analyze the following meal for a ${profileData.age}-year-old male (${profileData.height}cm, ${profileData.weight}kg). Provide a detailed nutritional breakdown including an exhaustive list of macros (Calories, Protein, Carbs, Saturated Fat, Unsaturated Fat, Cholesterol) and key micronutrients (Vitamin C, B3, E, B5, A, B6, B2, B1, B12, Magnesium, Chloride, Sodium, Calcium, Iron, Zinc, Manganese, Copper, Iodine, Omega-3). Format the response as a valid JSON object only, like this: {"name": "Meal Name", "items": ["Item 1", "Item 2"], "nutrition": {"Calories": 0, "Protein (g)": 0, "Carbs (g)": 0, "Saturated Fat (g)": 0, "Unsaturated Fat (g)": 0, "Cholesterol (mg)": 0, "Vitamin C (mg)": 0, "Iron (mg)": 0}}. The meal is: ${description}`;
             
             let resultText = await callGeminiApiForAnalysis(analysisPrompt, image);
@@ -508,17 +526,6 @@ const MealTrackerPage = () => {
         }
     };
     
-    const handleCameraAnalysis = (event) => {
-        const file = event.target.files[0];
-        if (!file) return;
-        const reader = new FileReader();
-        reader.onloadend = () => {
-            const base64String = reader.result.split(',')[1];
-            analyzeMeal("the meal in the image", base64String);
-        };
-        reader.readAsDataURL(file);
-    };
-
     const handleTextAnalysis = () => {
         if (!mealDescription) return;
         const keyword = mealDescription.toLowerCase().trim();
@@ -540,34 +547,33 @@ const MealTrackerPage = () => {
             <input type="date" value={currentDate} onChange={e => setCurrentDate(e.target.value)} className="w-full p-2 border rounded-md mb-4 bg-white dark:bg-gray-700 border-gray-300 dark:border-gray-600"/>
 
             <div className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-md mb-8">
-                <h2 className="text-xl font-bold text-gray-800 dark:text-gray-200 mb-4">Analyze & Add a Meal</h2>
+                <h2 className="text-xl font-bold text-gray-800 dark:text-gray-200 mb-4">Analyze & Add Item</h2>
                 <div className="flex border-b border-gray-200 dark:border-gray-700 mb-4">
                     <button onClick={() => setActiveTab('text')} className={`flex-1 py-2 text-center font-semibold ${activeTab === 'text' ? 'border-b-2 border-indigo-600 text-indigo-600 dark:text-indigo-400' : 'text-gray-500 dark:text-gray-400'}`}>By Text</button>
-                    <button onClick={() => setActiveTab('camera')} className={`flex-1 py-2 text-center font-semibold ${activeTab === 'camera' ? 'border-b-2 border-indigo-600 text-indigo-600 dark:text-indigo-400' : 'text-gray-500 dark:text-gray-400'}`}>By Camera <CameraIcon /></button>
+                    <button onClick={() => setActiveTab('camera')} className={`flex-1 py-2 text-center font-semibold ${activeTab === 'camera' ? 'border-b-2 border-indigo-600 text-indigo-600 dark:text-indigo-400' : 'text-gray-500 dark:text-gray-400'}`}>By Image</button>
                 </div>
 
                 {activeTab === 'text' && (
                     <div className="space-y-4">
-                        <textarea value={mealDescription} onChange={e => setMealDescription(e.target.value)} placeholder="Enter full meal description or a shortcut keyword..." className="w-full p-2 border rounded-md bg-white dark:bg-gray-700 border-gray-300 dark:border-gray-600" rows="3"></textarea>
+                        <textarea value={mealDescription} onChange={e => setMealDescription(e.target.value)} placeholder="Enter full meal description or a shortcut keyword..." className="w-full p-2 border rounded-md bg-white dark:bg-gray-700 border-gray-300 dark:border-gray-600 disabled:bg-gray-200" rows="3" disabled={isLoading}></textarea>
                         
                         <div className="text-center">
-                            <button onClick={() => setShowConstantCreator(!showConstantCreator)} className="text-sm text-blue-500 hover:underline">
+                             <button 
+                                onClick={() => setShowConstantCreator(!showConstantCreator)} 
+                                className="bg-gray-200 dark:bg-gray-700 text-gray-800 dark:text-gray-200 font-semibold py-2 px-4 rounded-md hover:bg-gray-300 dark:hover:bg-gray-600 transition-colors disabled:opacity-50"
+                                disabled={isLoading}
+                            >
                                 {showConstantCreator ? 'Hide Shortcut Creator' : 'Create Meal/Supplement Shortcut'}
                             </button>
                         </div>
 
                         {showConstantCreator && <MealConstantCreator saveMealConstants={saveMealConstants} mealConstants={mealConstants} saveSupplementConstants={saveSupplementConstants} supplementConstants={supplementConstants} />}
 
-                        <button onClick={handleTextAnalysis} className="w-full bg-indigo-600 text-white font-semibold py-2 px-4 rounded-md hover:bg-indigo-700">Analyze or Log Meal</button>
+                        <button onClick={handleTextAnalysis} className="w-full bg-indigo-600 text-white font-semibold py-2 px-4 rounded-md hover:bg-indigo-700 disabled:bg-indigo-300" disabled={isLoading}>Analyze or Log Meal</button>
                     </div>
                 )}
                 {activeTab === 'camera' && (
-                    <div>
-                        <label htmlFor="meal-image" className="w-full flex items-center justify-center gap-2 bg-indigo-600 text-white font-semibold py-2 px-4 rounded-md hover:bg-indigo-700 cursor-pointer">
-                            <CameraIcon /> Upload Meal Photo
-                        </label>
-                        <input type="file" id="meal-image" className="hidden" accept="image/*" onChange={handleCameraAnalysis} />
-                    </div>
+                    <ImageUploader onImageReady={(base64) => analyzeMeal("the meal in the image", base64)} title="Analyze by Photo" isDisabled={isLoading} />
                 )}
 
                 {isLoading && <div className="text-center p-4">{loadingMessage}</div>}
@@ -649,8 +655,8 @@ const MealTrackerPage = () => {
                     ) : <p>No supplements logged yet.</p>}
                 </div>
             </div>
-            <DaySummary log={getTodayLog()} />
-            <ActivityCalendar dailyLog={dailyLog} />
+            <DaySummary log={getTodayLog()} activityLevel={activityLevel} setActivityLevel={setActivityLevel} />
+            <ActivityCalendar dailyLog={dailyLog} activityLevel={activityLevel}/>
         </div>
     );
 };
@@ -774,9 +780,8 @@ const MealConstantCreator = ({ saveMealConstants, mealConstants, saveSupplementC
 
 
 // --- Day Summary Component ---
-const DaySummary = ({ log }) => {
+const DaySummary = ({ log, activityLevel, setActivityLevel }) => {
     const profile = JSON.parse(localStorage.getItem('userProfile') || '{}');
-    const [activityLevel, setActivityLevel] = useState('moderate');
 
     const rda = getPersonalizedRDA(profile, activityLevel);
     const rdaMap = rda.reduce((acc, item) => {
@@ -787,19 +792,22 @@ const DaySummary = ({ log }) => {
         return acc;
     }, {});
 
-    const totals = {};
-    rda.forEach(item => { totals[item.nutrient] = 0; });
+    const totals = React.useMemo(() => {
+        const newTotals = {};
+        rda.forEach(item => { newTotals[item.nutrient] = 0; });
 
-    (log.meals || []).forEach(meal => {
-        for (const [key, value] of Object.entries(meal.nutrition)) {
-            if (totals[key] !== undefined) totals[key] += parseFloat(value) || 0;
-        }
-    });
-    (log.supplements || []).forEach(sup => {
-        for (const [key, value] of Object.entries(sup.nutrition)) {
-            if (totals[key] !== undefined) totals[key] += parseFloat(value) || 0;
-        }
-    });
+        (log.meals || []).forEach(meal => {
+            for (const [key, value] of Object.entries(meal.nutrition)) {
+                if (newTotals[key] !== undefined) newTotals[key] += parseFloat(value) || 0;
+            }
+        });
+        (log.supplements || []).forEach(sup => {
+            for (const [key, value] of Object.entries(sup.nutrition)) {
+                if (newTotals[key] !== undefined) newTotals[key] += parseFloat(value) || 0;
+            }
+        });
+        return newTotals;
+    }, [log, rda]);
     
     const activityLevels = {
         light: { name: 'Light', tip: 'Primarily sitting (e.g., student, desk job)' },
@@ -862,7 +870,7 @@ const EditModal = ({ item, onSave, onClose }) => {
     const [customNutrients, setCustomNutrients] = useState([]);
 
     const handleNutritionChange = (key, value) => {
-        const newNutrition = { ...editedItem.nutrition, [key]: parseFloat(value) || 0 };
+        const newNutrition = { ...editedItem.nutrition, [key]: value };
         setEditedItem({ ...editedItem, nutrition: newNutrition });
     };
 
@@ -895,8 +903,8 @@ const EditModal = ({ item, onSave, onClose }) => {
                         <div key={key} className="flex items-center justify-between">
                             <label className="text-sm font-medium text-gray-700 dark:text-gray-300">{key}</label>
                             <input 
-                                type="number" 
-                                value={parseFloat(value) || ''}
+                                type="text" 
+                                value={value}
                                 onChange={(e) => handleNutritionChange(key, e.target.value)}
                                 className="w-1/2 p-1 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700"
                             />
@@ -924,10 +932,11 @@ const EditModal = ({ item, onSave, onClose }) => {
 
 
 // --- Activity Calendar Component ---
-const ActivityCalendar = ({ dailyLog }) => {
+const ActivityCalendar = ({ dailyLog, activityLevel }) => {
     const [date, setDate] = useState(new Date());
+    const [selectedDateLog, setSelectedDateLog] = useState(null);
     const profile = JSON.parse(localStorage.getItem('userProfile') || '{}');
-    const rda = calculateRDA(profile, 'moderate'); // Default to moderate for calendar view
+    const rda = calculateRDA(profile, activityLevel);
 
     const getDayStatusColor = (day) => {
         const dateString = day.toISOString().split('T')[0];
@@ -954,6 +963,15 @@ const ActivityCalendar = ({ dailyLog }) => {
         return 'bg-red-500 text-white';
     };
 
+    const handleDateClick = (day) => {
+        const dateString = new Date(date.getFullYear(), date.getMonth(), day).toISOString().split('T')[0];
+        setSelectedDateLog({
+            date: dateString,
+            log: dailyLog[dateString] || { meals: [], supplements: [] },
+            workRoutine: activityLevel
+        });
+    };
+
     const renderCalendar = () => {
         const year = date.getFullYear();
         const month = date.getMonth();
@@ -969,9 +987,9 @@ const ActivityCalendar = ({ dailyLog }) => {
             const dayDate = new Date(year, month, i);
             const colorClass = getDayStatusColor(dayDate);
             days.push(
-                <div key={i} className={`w-10 h-10 flex items-center justify-center rounded-full ${colorClass}`}>
+                <button key={i} onClick={() => handleDateClick(i)} className={`w-10 h-10 flex items-center justify-center rounded-full ${colorClass}`}>
                     {i}
-                </div>
+                </button>
             );
         }
         return days;
@@ -979,6 +997,7 @@ const ActivityCalendar = ({ dailyLog }) => {
 
     return (
         <div className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-md mt-8">
+            {selectedDateLog && <LogDetailModal logData={selectedDateLog} onClose={() => setSelectedDateLog(null)} />}
             <h2 className="text-xl font-bold text-gray-800 dark:text-gray-200 mb-4">Activity Calendar</h2>
             <div className="flex justify-between items-center mb-4">
                 <button onClick={() => setDate(new Date(date.setMonth(date.getMonth() - 1)))}>&lt;</button>
@@ -995,6 +1014,67 @@ const ActivityCalendar = ({ dailyLog }) => {
                 <div className="flex items-center gap-1"><div className="w-3 h-3 rounded-full bg-yellow-400"></div><span>Over 80%</span></div>
                 <div className="flex items-center gap-1"><div className="w-3 h-3 rounded-full bg-orange-400"></div><span>Over 50%</span></div>
                 <div className="flex items-center gap-1"><div className="w-3 h-3 rounded-full bg-red-500"></div><span>Under 50%</span></div>
+            </div>
+        </div>
+    );
+};
+
+// --- Log Detail Modal ---
+const LogDetailModal = ({ logData, onClose }) => {
+    const { date, log, workRoutine } = logData;
+    const profile = JSON.parse(localStorage.getItem('userProfile') || '{}');
+    const rda = getPersonalizedRDA(profile, workRoutine);
+    const rdaMap = rda.reduce((acc, item) => {
+        acc[item.nutrient] = {
+            value: parseFloat(item.value) || 1,
+            unit: item.value.split(' ')[1] || ''
+        };
+        return acc;
+    }, {});
+
+    const totals = {};
+    rda.forEach(item => { totals[item.nutrient] = 0; });
+
+    (log.meals || []).forEach(meal => {
+        for (const [key, value] of Object.entries(meal.nutrition)) {
+            if (totals[key] !== undefined) totals[key] += parseFloat(value) || 0;
+        }
+    });
+    (log.supplements || []).forEach(sup => {
+        for (const [key, value] of Object.entries(sup.nutrition)) {
+            if (totals[key] !== undefined) totals[key] += parseFloat(value) || 0;
+        }
+    });
+
+    return (
+        <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex justify-center items-center p-4">
+            <div className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-xl w-full max-w-md">
+                <h2 className="text-xl font-bold mb-2">Details for {date}</h2>
+                <p className="text-sm text-gray-500 dark:text-gray-400 mb-4">Work Routine: <span className="font-semibold capitalize">{workRoutine}</span></p>
+                <div className="max-h-64 overflow-y-auto space-y-4">
+                    <div>
+                        <h3 className="font-semibold mb-2">Nutrient Summary</h3>
+                        <div className="space-y-2">
+                           {Object.entries(totals).map(([nutrient, total]) => {
+                                const goal = rdaMap[nutrient]?.value || 1;
+                                const unit = rdaMap[nutrient]?.unit || '';
+                                const percent = Math.min(Math.round((total / goal) * 100), 100);
+                                return (
+                                    <div key={nutrient}>
+                                        <div className="flex justify-between text-xs font-medium">
+                                            <span>{nutrient.split(' (')[0]}</span>
+                                            <span>{Math.round(total)}/{goal} {unit}</span>
+                                        </div>
+                                        <div className="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2 mt-1">
+                                            <div className="bg-indigo-600 h-2 rounded-full" style={{ width: `${percent}%` }}></div>
+                                        </div>
+                                    </div>
+                                )
+                           })}
+                        </div>
+                    </div>
+                </div>
+                <button onClick={onClose} className="w-full mt-6 bg-indigo-600 text-white font-semibold py-2 px-4 rounded-md hover:bg-indigo-700">Close</button>
             </div>
         </div>
     );
@@ -1091,10 +1171,14 @@ const SupplementAdvisor = () => {
         setIsLoading(true);
         setSuggestion('');
         const profileData = JSON.parse(localStorage.getItem('userProfile') || '{}');
-        const prompt = `I am a ${profileData.age}-year-old male in ${profileData.location} (${profileData.height}cm, ${profileData.weight}kg). I am looking for a supplement for "${query}". Please suggest a specific, commercially available product in India (like Becosules, Shelcal, etc.). Explain why it's a good choice and give the typical dosage. Keep the response concise and practical.`;
+        if (Object.values(profileData).some(field => field === '')) {
+            alert("Please complete all fields in your profile before using AI features.");
+            return;
+        }
+        const prompt = `I am a ${profileData.age}-year-old male in ${profileData.location} (${profileData.height}cm, ${profileData.weight}kg). I am looking for a supplement for "${query}". Please suggest a specific, commercially available product in ${profileData.location} (like Becosules, Shelcal, etc.). Explain why it's a good choice and give the typical dosage. Keep the response concise and practical.`;
         
         const result = await (async () => {
-            const apiKey = "";
+            const apiKey = "process.env.REACT_APP_GEMINI_API_KEY";
             const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-05-20:generateContent?key=${apiKey}`;
             const payload = { contents: [{ role: "user", parts: [{ text: prompt }] }] };
             try {
@@ -1137,27 +1221,21 @@ const SupplementAdvisor = () => {
 
 // --- Meal Advisor Component ---
 const MealAdvisor = () => {
-    const [menuImage, setMenuImage] = useState(null);
-    const [adviceType, setAdviceType] = useState(null);
-    const [budget, setBudget] = useState('');
     const [suggestion, setSuggestion] = useState('');
     const [isLoading, setIsLoading] = useState(false);
+    const [adviceType, setAdviceType] = useState(null);
+    const [budget, setBudget] = useState('');
+    const [imageReady, setImageReady] = useState(false);
 
-    const handleImageUpload = (event) => {
-        const file = event.target.files[0];
-        if (!file) return;
-        const reader = new FileReader();
-        reader.onloadend = () => {
-            const base64String = reader.result.replace('data:', '').replace(/^.+,/, '');
-            setMenuImage(base64String);
-            setAdviceType(null); // Reset advice type on new image
-            setSuggestion('');
-        };
-        reader.readAsDataURL(file);
-    };
-
-    const getMealSuggestion = async () => {
-        if (!menuImage || !adviceType) return;
+    const getMealSuggestion = async (base64Image) => {
+        if (!base64Image) {
+            alert("Please upload an image first.");
+            return;
+        }
+        if (!adviceType) {
+            alert("Please select a preference (Diet or Budget).");
+            return;
+        }
         if (adviceType === 'budget' && !budget) {
             alert("Please enter a budget.");
             return;
@@ -1166,6 +1244,10 @@ const MealAdvisor = () => {
         setSuggestion('');
 
         const profileData = JSON.parse(localStorage.getItem('userProfile') || '{}');
+        if (Object.values(profileData).some(field => field === '')) {
+            alert("Please complete all fields in your profile before using AI features.");
+            return;
+        }
         let prompt;
         if (adviceType === 'diet') {
             prompt = `I am a ${profileData.age}-year-old male (${profileData.height}cm, ${profileData.weight}kg) aiming for muscle gain. Based on the attached restaurant menu image, suggest the most diet-friendly and high-protein meal option available. Explain your choice briefly.`;
@@ -1174,9 +1256,9 @@ const MealAdvisor = () => {
         }
 
         const result = await (async () => {
-            const apiKey = "";
+            const apiKey = "process.env.REACT_APP_GEMINI_API_KEY";
             const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-05-20:generateContent?key=${apiKey}`;
-            const payload = { contents: [{ role: "user", parts: [{ text: prompt }, { inlineData: { mimeType: "image/jpeg", data: menuImage } }] }] };
+            const payload = { contents: [{ role: "user", parts: [{ text: prompt }, { inlineData: { mimeType: "image/jpeg", data: base64Image } }] }] };
             try {
                 const response = await fetch(apiUrl, {
                     method: 'POST',
@@ -1198,12 +1280,9 @@ const MealAdvisor = () => {
 
     return (
         <div className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-md space-y-4">
-            <label htmlFor="menu-image" className="w-full flex items-center justify-center gap-2 bg-indigo-600 text-white font-semibold py-2 px-4 rounded-md hover:bg-indigo-700 cursor-pointer">
-                <CameraIcon /> {menuImage ? 'Change Menu Photo' : 'Upload Menu Photo'}
-            </label>
-            <input type="file" id="menu-image" className="hidden" accept="image/*" onChange={handleImageUpload} />
+            <ImageUploader onImageReady={() => setImageReady(true)} title="Upload Menu Photo" onAnalyze={getMealSuggestion} />
 
-            {menuImage && (
+            {imageReady && (
                 <div>
                     <h3 className="font-semibold text-center mb-2">Choose your preference:</h3>
                     <div className="flex gap-4">
@@ -1217,10 +1296,6 @@ const MealAdvisor = () => {
                 <input type="number" value={budget} onChange={e => setBudget(e.target.value)} placeholder="Enter budget (INR)" className="w-full p-2 border rounded-md bg-white dark:bg-gray-700 border-gray-300 dark:border-gray-600" />
             )}
 
-            {adviceType && (
-                <button onClick={getMealSuggestion} className="w-full bg-indigo-600 text-white font-semibold py-2 px-4 rounded-md hover:bg-indigo-700">Get Meal Suggestion</button>
-            )}
-
             {isLoading && <div className="text-center p-4">Thinking...</div>}
             {suggestion && (
                 <div className="mt-4 p-4 bg-gray-100 dark:bg-gray-700 rounded-md">
@@ -1231,6 +1306,141 @@ const MealAdvisor = () => {
         </div>
     );
 };
+
+// --- Image Uploader Component ---
+const ImageUploader = ({ onImageReady, title, onAnalyze, isDisabled }) => {
+    const [imageSrc, setImageSrc] = useState(null);
+    const [imageBase64, setImageBase64] = useState(null);
+    const [isDragging, setIsDragging] = useState(false);
+    const [showModal, setShowModal] = useState(false);
+    const videoRef = useRef(null);
+    const canvasRef = useRef(null);
+
+    const handleFile = (file) => {
+        if (file && file.type.startsWith('image/')) {
+            const reader = new FileReader();
+            reader.onloadend = () => {
+                setImageSrc(reader.result);
+                const base64 = reader.result.split(',')[1];
+                setImageBase64(base64);
+                if (onImageReady) onImageReady(base64);
+            };
+            reader.readAsDataURL(file);
+        } else {
+            alert("Please select an image file.");
+        }
+    };
+
+    const handleDragOver = (e) => {
+        e.preventDefault();
+        setIsDragging(true);
+    };
+    const handleDragLeave = (e) => {
+        e.preventDefault();
+        setIsDragging(false);
+    };
+    const handleDrop = (e) => {
+        e.preventDefault();
+        setIsDragging(false);
+        handleFile(e.dataTransfer.files[0]);
+    };
+    const handlePaste = useCallback((e) => {
+        const items = e.clipboardData.items;
+        for (let i = 0; i < items.length; i++) {
+            if (items[i].type.indexOf('image') !== -1) {
+                handleFile(items[i].getAsFile());
+                break;
+            }
+        }
+    }, []);
+
+    useEffect(() => {
+        window.addEventListener('paste', handlePaste);
+        return () => window.removeEventListener('paste', handlePaste);
+    }, [handlePaste]);
+
+    const startCamera = async () => {
+        try {
+            const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+            if (videoRef.current) {
+                videoRef.current.srcObject = stream;
+            }
+            setShowModal(true);
+        } catch (err) {
+            console.error("Error accessing camera:", err);
+            alert("Could not access camera. Please ensure you have given permission.");
+        }
+    };
+
+    const captureImage = () => {
+        if (videoRef.current && canvasRef.current) {
+            const context = canvasRef.current.getContext('2d');
+            canvasRef.current.width = videoRef.current.videoWidth;
+            canvasRef.current.height = videoRef.current.videoHeight;
+            context.drawImage(videoRef.current, 0, 0);
+            const dataUrl = canvasRef.current.toDataURL('image/jpeg');
+            setImageSrc(dataUrl);
+            const base64 = dataUrl.split(',')[1];
+            setImageBase64(base64);
+            if (onImageReady) onImageReady(base64);
+            stopCamera();
+        }
+    };
+
+    const stopCamera = () => {
+        if (videoRef.current && videoRef.current.srcObject) {
+            videoRef.current.srcObject.getTracks().forEach(track => track.stop());
+        }
+        setShowModal(false);
+    };
+
+    return (
+        <div className="mt-4">
+            <div className="flex gap-2">
+                <button onClick={() => document.getElementById('file-upload').click()} className="w-1/2 bg-blue-500 text-white font-semibold py-2 px-4 rounded-md hover:bg-blue-600 disabled:bg-blue-300" disabled={isDisabled}>Select File</button>
+                <button onClick={startCamera} className="w-1/2 bg-green-500 text-white font-semibold py-2 px-4 rounded-md hover:bg-green-600 disabled:bg-green-300" disabled={isDisabled}>Use Camera</button>
+            </div>
+            <input type="file" id="file-upload" className="hidden" accept="image/*" onChange={(e) => handleFile(e.target.files[0])} />
+
+            <div 
+                onDragOver={handleDragOver} 
+                onDragLeave={handleDragLeave} 
+                onDrop={handleDrop}
+                className={`mt-4 p-4 border-2 border-dashed rounded-lg text-center transition-colors ${isDragging ? 'border-indigo-500 bg-indigo-50 dark:bg-indigo-900/50' : 'border-gray-300 dark:border-gray-600'}`}
+            >
+                <div className="relative">
+                    {imageSrc && <p className="font-semibold mb-2">Image Preview:</p>}
+                    {imageSrc ? (
+                        <img src={imageSrc} alt="Uploaded" className="max-h-48 mx-auto rounded-md" />
+                    ) : (
+                        <p>Drag & drop an image, or paste from clipboard (Ctrl+V)</p>
+                    )}
+                    {isDragging && (
+                        <div className="absolute inset-0 bg-indigo-500 bg-opacity-75 flex items-center justify-center rounded-lg">
+                            <p className="text-white text-2xl font-bold">Gimme that food</p>
+                        </div>
+                    )}
+                </div>
+            </div>
+            
+            {imageSrc && onAnalyze && (
+                <button onClick={() => onAnalyze(imageBase64)} className="w-full mt-4 bg-indigo-600 text-white font-semibold py-2 px-4 rounded-md hover:bg-indigo-700 disabled:bg-indigo-300" disabled={isDisabled}>Analyze Image</button>
+            )}
+
+            {showModal && (
+                <div className="fixed inset-0 bg-black bg-opacity-75 z-50 flex flex-col items-center justify-center">
+                    <video ref={videoRef} autoPlay className="w-full max-w-md rounded-lg"></video>
+                    <canvas ref={canvasRef} className="hidden"></canvas>
+                    <div className="flex gap-4 mt-4">
+                        <button onClick={captureImage} className="bg-indigo-600 text-white font-semibold py-2 px-6 rounded-md">Capture</button>
+                        <button onClick={stopCamera} className="bg-gray-500 text-white font-semibold py-2 px-6 rounded-md">Cancel</button>
+                    </div>
+                </div>
+            )}
+        </div>
+    );
+};
+
 
 // --- Helper Functions ---
 const getPersonalizedRDA = (profile, activityLevel = 'moderate') => {
