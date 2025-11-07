@@ -54,7 +54,7 @@ To get a local copy up and running, follow these simple steps.
 <summary><strong>1. Clone the repository</strong></summary>
 
 ```sh
-git clone https://github.com/your-username/annavistara.git
+git clone https://github.com/OrangeSorbet/annavistara.git
 cd annavistara
 ```
 
